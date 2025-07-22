@@ -145,32 +145,35 @@ def add_asset_to_immich_album(api_url: str, api_key: str, asset_id: str, album_i
          print(f"Error decoding add asset response JSON: {response.text}")
          return False
 
-def archive_immich_asset(api_url: str, api_key: str, asset_id: str) -> bool:
-    """Archives assets in Immich by updating their properties."""
-    endpoint = f"{api_url.rstrip('/')}/assets" # Endpoint for updating assets
+def visibility_immich_asset(api_url: str, api_key: str, asset_id: str, action: str) -> bool:
+    """Updates asset visibility in Immich by updating their properties.
+    
+    Args:
+        api_url: The Immich API URL
+        api_key: The Immich API key
+        asset_id: The ID of the asset to update
+        action: The visibility action to take (archive, timeline, hidden, locked)
+    
+    Returns:
+        bool: True if the update was successful, False otherwise
+    """
+    endpoint = f"{api_url.rstrip('/')}/assets"
     headers = {'x-api-key': api_key, 'Content-Type': 'application/json'}
-    # Payload needs the IDs and the property to update
     payload = {
         "ids": [asset_id],
-        "isArchived": True 
+        "visibility": action
     }
     try:
-        response = requests.put(endpoint, headers=headers, json=payload) 
+        response = requests.put(endpoint, headers=headers, json=payload)
         response.raise_for_status()
-        # A successful PUT might return 200 OK with no body or minimal info.
-        # We assume success if no exception is raised.
-        print(f"  Successfully sent archive request for asset {asset_id}.")
+        print(f"  Successfully updated visibility for asset {asset_id} to {action}.")
         return True
     except requests.exceptions.RequestException as e:
-        print(f"Error sending archive request for asset {asset_id}: {e}")
-        # Handle potential 404 if endpoint is wrong, or other errors like 400 Bad Request
-        # if e.response is not None:
-        #    print(f"Response status: {e.response.status_code}")
-        #    print(f"Response body: {e.response.text}")
+        print(f"Error updating visibility for asset {asset_id}: {e}")
         return False
     except Exception as e:
-         print(f"An unexpected error occurred during archive request for {asset_id}: {e}")
-         return False
+        print(f"An unexpected error occurred during visibility update for {asset_id}: {e}")
+        return False
 
 def get_immich_asset_details(api_url: str, api_key: str, asset_id: str) -> dict | None:
     """Fetches details for a specific asset from Immich."""
@@ -483,7 +486,7 @@ if __name__ == "__main__":
                         actions_to_perform.append({
                             "asset_id": asset_id,
                             "album_names": rule["album_names"],
-                            "action_type": rule["action"],
+                            "action_type": rule.get("visibility"),  # Use visibility field instead of action
                             "matched_keyword": rule["keyword"], # Log the specific keyword
                             "similarity_score": similarity     # Log the individual similarity
                         })
@@ -516,7 +519,7 @@ if __name__ == "__main__":
                          actions_to_perform.append({
                              "asset_id": asset_id,
                              "album_names": group["album_names"],
-                             "action_type": group["action"],
+                             "action_type": group.get("visibility"),  # Use visibility field instead of action
                              "matched_keyword": f"Group: {group_name}", # Log the group name
                              "similarity_score": total_similarity     # Log the summed similarity
                          })
@@ -566,79 +569,77 @@ if __name__ == "__main__":
             # Perform actions for each matched asset
             successful_album_adds = 0 
             db_log_entries_queued = 0 # Counter for queued logs
+            unique_album_adds_for_asset = set() # Track unique album additions per asset to avoid duplicates
+            should_update_visibility = True # Flag to control visibility updates
             for asset_id, asset_actions in actions_by_asset.items():
                 print(f"-- Processing Asset {asset_id} --")
-                added_to_at_least_one_album = False
-                # Determine if *any* action for this asset requests archiving
-                should_archive = any(a['action_type'] == 'archive' for a in asset_actions) 
+                added_to_at_least_one_album = False  # Initialize to False
                 
-                # --- Step 1: Add to all relevant albums (from rules or groups) --- 
-                unique_album_adds_for_asset = set() 
-                for action in asset_actions:
-                    album_names = action["album_names"]
-                    # Use the specific keyword or group name stored in the action for logging
-                    trigger_source = action["matched_keyword"] 
-                    score = action["similarity_score"]
-                    
-                    for album_name in album_names:
-                        album_id = album_id_cache.get(album_name)
-                        if not album_id:
-                            # This message is fine as is
-                            print(f"  Skipping add to album '{album_name}' - Album ID not found.")
-                            continue
-                            
-                        # Avoid redundant API calls if multiple rules/groups point to same album for same asset
-                        log_key = (asset_id, album_id)
-                        if log_key in unique_album_adds_for_asset:
-                             # Skip API call, but we *still* want to log this trigger if needed? 
-                             # No, current logic logs based on API attempt result. Let's stick to that.
-                             # print(f"  Skipping redundant API call for asset {asset_id} to album {album_id}")
-                             continue 
-
-                        print(f"  Attempting to add asset {asset_id} to album '{album_name}' (ID: {album_id}) triggered by '{trigger_source}'...") 
-                        added_to_this_album = add_asset_to_immich_album(immich_api_url, immich_api_key, asset_id, album_id)
-                        unique_album_adds_for_asset.add(log_key) # Mark as attempted
+                # Only try to add to albums if there are any album names
+                if any(action["album_names"] for action in asset_actions):
+                    for action in asset_actions:
+                        album_names = action["album_names"]
+                        # Use the specific keyword or group name stored in the action for logging
+                        trigger_source = action["matched_keyword"]
+                        score = action["similarity_score"]
                         
-                        if added_to_this_album:
-                             successful_album_adds += 1
-                             added_to_at_least_one_album = True
-                             # --- IMMEDIATE DB LOG --- 
-                             db_log_entry = (asset_id, trigger_source, float(score), album_id, album_name)
-                             try:
-                                 if sqlite_conn and sqlite_cur:
-                                      sqlite_cur.execute("""
-                                          INSERT OR IGNORE INTO processed_assets 
-                                          (asset_id, matched_keyword, similarity_score, target_album_id, target_album_name)
-                                          VALUES (?, ?, ?, ?, ?)
-                                          """, db_log_entry)
-                                      db_log_entries_queued += 1 # Increment counter
-                                      # print(f"    -> Queued DB log: {db_log_entry}") # Verbose log, uncomment if needed
-                                 else:
-                                      print("    -> DB connection not available for queueing log.")
-                             except sqlite3.Error as e:
-                                 print(f"    -> ERROR queueing DB log entry: {e}")
-                             # --- END IMMEDIATE DB LOG ---
-                             
-                # --- End Album Add Loop for Asset --- 
+                        for album_name in album_names:
+                            album_id = album_id_cache.get(album_name)
+                            if not album_id:
+                                # This message is fine as is
+                                print(f"  Skipping add to album '{album_name}' - Album ID not found.")
+                                continue
+                                
+                            # Avoid redundant API calls if multiple rules/groups point to same album for same asset
+                            log_key = (asset_id, album_id)
+                            if log_key in unique_album_adds_for_asset:
+                                continue 
+
+                            print(f"  Attempting to add asset {asset_id} to album '{album_name}' (ID: {album_id}) triggered by '{trigger_source}'...") 
+                            added_to_this_album = add_asset_to_immich_album(immich_api_url, immich_api_key, asset_id, album_id)
+                            unique_album_adds_for_asset.add(log_key) # Mark as attempted
+                            
+                            if added_to_this_album:
+                                successful_album_adds += 1
+                                added_to_at_least_one_album = True
+                                # --- IMMEDIATE DB LOG --- 
+                                db_log_entry = (asset_id, trigger_source, float(score), album_id, album_name)
+                                try:
+                                    if sqlite_conn and sqlite_cur:
+                                        sqlite_cur.execute("""
+                                            INSERT OR IGNORE INTO processed_assets 
+                                            (asset_id, matched_keyword, similarity_score, target_album_id, target_album_name)
+                                            VALUES (?, ?, ?, ?, ?)
+                                            """, db_log_entry)
+                                        db_log_entries_queued += 1 # Increment counter
+                                    else:
+                                        print("    -> DB connection not available for queueing log.")
+                                except sqlite3.Error as e:
+                                    print(f"    -> ERROR queueing DB log entry: {e}")
+                                # --- END IMMEDIATE DB LOG ---
+                else:
+                    print(f"  No album names specified for asset {asset_id}, skipping album additions.")
                 
-                # --- Step 2: Archive if needed and possible --- 
-                # This logic remains the same: archive if *any* matching rule/group requested it
-                # AND if the asset was successfully added to at least one album.
-                if added_to_at_least_one_album and should_archive:
+                # --- Step 2: Update visibility if needed and possible --- 
+                # Now we check for visibility updates regardless of album additions
+                if should_update_visibility:
                     asset_details = get_immich_asset_details(immich_api_url, immich_api_key, asset_id)
-                    if asset_details and asset_details.get('isArchived') is False:
-                         print(f"  Asset {asset_id} is not archived. Attempting archive (requested by at least one rule/group)...")
-                         archive_success = archive_immich_asset(immich_api_url, immich_api_key, asset_id)
-                         if not archive_success:
-                             print(f"Warning: Failed to archive asset {asset_id} after adding to album(s).")
-                    elif asset_details and asset_details.get('isArchived') is True:
-                         print(f"  Skipping archive for asset {asset_id}: Already archived.")
+                    # Get the requested visibility from the first matching rule/group that has a non-empty action_type
+                    requested_visibility = next((a['action_type'] for a in asset_actions if a['action_type'] and a['action_type'] != 'None'), None)
+                    
+                    if requested_visibility and asset_details and asset_details.get('visibility') != requested_visibility:
+                        print(f"  Asset {asset_id} visibility is {asset_details.get('visibility')}. Attempting to set visibility to {requested_visibility} (requested by at least one rule/group)...")
+                        visibility_success = visibility_immich_asset(immich_api_url, immich_api_key, asset_id, requested_visibility)
+                        if not visibility_success:
+                            print(f"Warning: Failed to update visibility for asset {asset_id} after adding to album(s).")
+                    elif asset_details and asset_details.get('visibility') == requested_visibility:
+                        print(f"  Skipping visibility update for asset {asset_id}: Already has requested visibility {requested_visibility}.")
+                    elif not requested_visibility:
+                        print(f"  Skipping visibility update for asset {asset_id}: No valid visibility action requested.")
                     else:
-                         print(f"Warning: Could not determine archive status for asset {asset_id}. Skipping archive attempt.")
-                elif not added_to_at_least_one_album and should_archive: # Check if archive was requested but add failed
-                    print(f"  Skipping archive for asset {asset_id}: Archive requested, but failed to add to any target albums.")
-                elif not should_archive:
-                     print(f"  Skipping archive for asset {asset_id}: Not requested by any matching rule or group.")
+                        print(f"Warning: Could not determine visibility status for asset {asset_id}. Skipping visibility update attempt.")
+                else:
+                    print(f"  Skipping visibility update for asset {asset_id}: Not requested by any matching rule or group.")
             # --- End Asset Processing Loop --- 
              
             print(f"\nImmich API actions complete. {successful_album_adds} total successful album additions performed." )        
