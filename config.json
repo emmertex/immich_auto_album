@@ -2,103 +2,97 @@
     "classification_rules": [
         {
             "keyword": "invoice",
-            "min_similarity": 0.05,
+            "min_similarity": 0.075,
             "album_names": ["Documents"],
             "action": "archive"
         },
         {
             "keyword": "receipt",
-            "min_similarity": 0.05,
+            "min_similarity": 0.075,
             "album_names": ["Documents"],
             "action": "archive"
         },
         {
             "keyword": "financial statement",
-            "min_similarity": 0.05,
+            "min_similarity": 0.075,
             "album_names": ["Documents"],
             "action": "archive"
         },
         {
             "keyword": "handjob",
-            "min_similarity": 0.045,
-            "album_names": ["NSFW"],
-            "action": "archive"
-        },
-        {
-            "keyword": "sucking",
-            "min_similarity": 0.045,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "nsfw",
-            "min_similarity": 0.05,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "breasts",
-            "min_similarity": 0.045,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "sex",
-            "min_similarity": 0.04,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "nude",
-            "min_similarity": 0.05,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "female nipple",
-            "min_similarity": 0.03,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "topless woman",
-            "min_similarity": 0.025,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "penis",
-            "min_similarity": 0.05,
+            "min_similarity": 0.075,
             "album_names": ["NSFW"],
             "action": "archive"
         },
         {
             "keyword": "screenshot of a phone",
-            "min_similarity": 0.03,
+            "min_similarity": 0.075,
             "album_names": ["Screenshots"],
             "action": "archive"
         },
         {
             "keyword": "screen with text",
-            "min_similarity": 0.02,
+            "min_similarity": 0.075,
             "album_names": ["Screenshots"],
             "action": "archive"
         },
         {
             "keyword": "screen with status bar",
-            "min_similarity": 0.02,
+            "min_similarity": 0.075,
             "album_names": ["Screenshots"],
             "action": "archive"
         },
         {
             "keyword": "display",
-            "min_similarity": 0.1,
+            "min_similarity": 0.075,
             "album_names": ["Screenshots"],
             "action": "archive"
         },
         {
             "keyword": "screenshot",
-            "min_similarity": 0.02,
+            "min_similarity": 0.075,
             "album_names": ["Screenshots"],
             "action": "archive"
         }
@@ -106,29 +100,29 @@
     "classification_groups": [
         {
            "group_name": "NSFW Sucking",
-           "keywords": ["handjob", "sucking", "nude", "female nipple", "penis"], 
-           "min_sum_similarity": 0.08, 
+           "keywords": ["handjob", "nude", "female nipple", "penis"], 
+           "min_sum_similarity": 0.3, 
            "album_names": ["NSFW"],
            "action": "archive"
         },
         {
             "group_name": "NSFW Breasts",
             "keywords": ["breasts", "nude", "female nipple", "topless woman"], 
-            "min_sum_similarity": 0.08, 
+            "min_sum_similarity": 0.3, 
             "album_names": ["NSFW"],
             "action": "archive"
          },
          {
              "group_name": "NSFW General",
-             "keywords": ["breasts", "nude", "female nipple", "topless woman", "handjob", "sucking", "nude", "female nipple", "penis"], 
-             "min_sum_similarity": 0.1, 
+             "keywords": ["breasts", "nude", "female nipple", "topless woman", "handjob", "nude", "female nipple", "penis"], 
+             "min_sum_similarity": 0.6, 
              "album_names": ["NSFW"],
              "action": "archive"
           },
           {
             "group_name": "Screenshots General",
             "keywords": ["screenshot", "screen with text", "screen with status bar", "display", "feed"],
-            "min_sum_similarity": 0.02,
+            "min_sum_similarity": 0.8,
             "album_names": ["Screenshots"],
             "action": "archive"
           }

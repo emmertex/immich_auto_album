@@ -204,6 +204,8 @@ if __name__ == "__main__":
                         help="Perform a full scan of all assets, ignoring timestamps and previously processed IDs.")
     parser.add_argument("--full-unarchived-scan", action="store_true", 
                         help="Perform a full scan of all unarchived assets, ignoring timestamps and previously processed IDs.")
+    parser.add_argument("--ignore-completed", action="store_true",
+                        help="Reprocess assets even if they are already in the processed IDs database.")
     args = parser.parse_args()
     
     # Load environment variables
@@ -277,9 +279,12 @@ if __name__ == "__main__":
         sqlite_conn.commit()
         print(f"Using SQLite database: {sqlite_db_file}")
 
-        if args.full_scan:
-            print("*** Performing Full Scan - Ignoring previously processed IDs and timestamps ***")
-            processed_asset_ids = set() # Start with an empty set for full scan
+        if args.full_scan or args.ignore_completed:
+            if args.full_scan:
+                print("*** Performing Full Scan - Ignoring previously processed IDs and timestamps ***")
+            elif args.ignore_completed:
+                print("*** Ignoring completed assets - Reprocessing all assets regardless of previous processing ***")
+            processed_asset_ids = set() # Start with an empty set for full scan or ignore completed
         elif args.full_unarchived_scan:
             # Load existing processed IDs from SQLite (only if NOT full scan)
             sqlite_cur.execute("SELECT asset_id FROM processed_assets")
@@ -313,18 +318,23 @@ if __name__ == "__main__":
         # Use timezone-aware UTC now
         # Use fetch_hours from config
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=fetch_hours)
-        if not args.full_scan and not args.full_unarchived_scan:
+        if not args.full_scan and not args.full_unarchived_scan and not args.ignore_completed:
              print(f"Fetching assets newer than {cutoff_time} ({fetch_hours} hours ago)...")
+        elif args.ignore_completed and not args.full_scan and not args.full_unarchived_scan:
+             print(f"Fetching assets newer than {cutoff_time} ({fetch_hours} hours ago) - but ignoring completion status...")
         recent_assets = []
         
         base_query = """
         SELECT a.id, ss."embedding"
-        FROM assets a
+        FROM asset a
         JOIN smart_search ss ON a.id = ss."assetId"
         """
         params = []
         
-        if not args.full_scan and not args.full_unarchived_scan:
+        if not args.full_scan and not args.full_unarchived_scan and not args.ignore_completed:
+            query = base_query + " WHERE a.\"createdAt\" >= %s ORDER BY a.\"createdAt\" DESC;"
+            params.append(cutoff_time)
+        elif args.ignore_completed and not args.full_scan and not args.full_unarchived_scan:
             query = base_query + " WHERE a.\"createdAt\" >= %s ORDER BY a.\"createdAt\" DESC;"
             params.append(cutoff_time)
         else:
@@ -359,8 +369,8 @@ if __name__ == "__main__":
 
         print(f"Fetched and processed {len(recent_assets)} image assets from the database.")
 
-        # Filter out already processed assets (Skip if full_scan)
-        if not args.full_scan:
+        # Filter out already processed assets (Skip if full_scan or ignore_completed)
+        if not args.full_scan and not args.ignore_completed:
             assets_before_filtering = len(recent_assets)
             new_assets_to_process = [
                 asset for asset in recent_assets 
@@ -370,7 +380,7 @@ if __name__ == "__main__":
             if filtered_count > 0:
                  print(f"Filtered out {filtered_count} previously processed assets.")
         else:
-             # For full scan, process everything fetched
+             # For full scan or ignore completed, process everything fetched
              new_assets_to_process = recent_assets 
              
         print(f"Found {len(new_assets_to_process)} assets to classify.")
@@ -486,7 +496,7 @@ if __name__ == "__main__":
                         actions_to_perform.append({
                             "asset_id": asset_id,
                             "album_names": rule["album_names"],
-                            "action_type": rule.get("visibility"),  # Use visibility field instead of action
+                            "action_type": rule.get("action"),  # Use action field from config
                             "matched_keyword": rule["keyword"], # Log the specific keyword
                             "similarity_score": similarity     # Log the individual similarity
                         })
@@ -519,7 +529,7 @@ if __name__ == "__main__":
                          actions_to_perform.append({
                              "asset_id": asset_id,
                              "album_names": group["album_names"],
-                             "action_type": group.get("visibility"),  # Use visibility field instead of action
+                             "action_type": group.get("action"),  # Use action field from config
                              "matched_keyword": f"Group: {group_name}", # Log the group name
                              "similarity_score": total_similarity     # Log the summed similarity
                          })
@@ -632,6 +642,8 @@ if __name__ == "__main__":
                         visibility_success = visibility_immich_asset(immich_api_url, immich_api_key, asset_id, requested_visibility)
                         if not visibility_success:
                             print(f"Warning: Failed to update visibility for asset {asset_id} after adding to album(s).")
+                    elif asset_details and asset_details.get('visibility') == 'locked':
+                        print(f"  Skipping visibility update for asset {asset_id}: Locked.")
                     elif asset_details and asset_details.get('visibility') == requested_visibility:
                         print(f"  Skipping visibility update for asset {asset_id}: Already has requested visibility {requested_visibility}.")
                     elif not requested_visibility:
